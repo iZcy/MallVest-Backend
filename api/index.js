@@ -1,71 +1,46 @@
 const express = require("express");
+const mongoose = require("mongoose");
+const bodyParser = require("body-parser");
+const dotenv = require("dotenv");
+const RevenueReport = require("../models/RevenueReport");
 const cors = require("cors");
-const { MongoClient } = require("mongodb");
-const serverless = require("serverless-http");
+
+dotenv.config();
 
 const app = express();
-app.use(express.json());
 
 // ✅ Allow all CORS
 app.use(cors({ origin: "*" }));
 
-// 🧠 MongoDB setup
-const uri = process.env.MONGO_URI;
-let db;
+app.use(bodyParser.json());
 
-async function connectToDb() {
-  if (!db) {
-    const client = new MongoClient(uri);
-    await client.connect();
-    db = client.db(); // Default DB
-  }
-  return db;
-}
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+});
 
-// ✅ POST /reports
+// Create
 app.post("/reports", async (req, res) => {
-  try {
-    const db = await connectToDb();
-    const result = await db.collection("revenueReports").insertOne(req.body);
-    res.status(201).json({ insertedId: result.insertedId });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  const report = new RevenueReport(req.body);
+  await report.save();
+  res.json(report);
 });
 
-// ✅ GET /reports/:vaultAddress/:period
+// Read (e.g. for oracle)
 app.get("/reports/:vaultAddress/:period", async (req, res) => {
-  try {
-    const db = await connectToDb();
-    const report = await db.collection("revenueReports").findOne({
-      vaultAddress: req.params.vaultAddress,
-      period: req.params.period
-    });
-
-    if (!report) return res.status(404).json({ error: "Not found" });
-    res.json(report);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  const { vaultAddress, period } = req.params;
+  const report = await RevenueReport.findOne({ vaultAddress, period });
+  res.json(report);
 });
 
-// ✅ DELETE /reports/:vaultAddress/:period
-app.delete("/reports/:vaultAddress/:period", async (req, res) => {
-  try {
-    const db = await connectToDb();
-    const result = await db.collection("revenueReports").deleteOne({
-      vaultAddress: req.params.vaultAddress,
-      period: req.params.period
-    });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: "Not found" });
-    }
-    res.json({ deleted: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+// Mark as claimed
+app.put("/reports/:id/claim", async (req, res) => {
+  const report = await RevenueReport.findByIdAndUpdate(
+    req.params.id,
+    { claimed: true },
+    { new: true }
+  );
+  res.json(report);
 });
 
-// Export the wrapped handler
-module.exports = serverless(app);
+app.listen(3000, () => console.log("Server running on port 3000"));
