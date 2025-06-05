@@ -1,41 +1,71 @@
 const express = require("express");
-const mongoose = require("mongoose");
-const bodyParser = require("body-parser");
-const RevenueReport = require("../models/RevenueReport");
+const cors = require("cors");
+const { MongoClient } = require("mongodb");
+const serverless = require("serverless-http");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-mongoose.connect(
-  "mongodb+srv://yitzhakedmundtiomanalu:y8TpvfIZIGBbPc7o@cluster0.ivwv9wb.mongodb.net/mallvestrevenue?connectTimeoutMS=120000&socketTimeoutMS=120000&serverSelectionTimeoutMS=120000",
-  {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
+// ✅ Allow all CORS
+app.use(cors({ origin: "*" }));
+
+// 🧠 MongoDB setup
+const uri = process.env.MONGO_URI;
+let db;
+
+async function connectToDb() {
+  if (!db) {
+    const client = new MongoClient(uri);
+    await client.connect();
+    db = client.db(); // Default DB
   }
-);
+  return db;
+}
 
-// Create
+// ✅ POST /reports
 app.post("/reports", async (req, res) => {
-  const report = new RevenueReport(req.body);
-  await report.save();
-  res.json(report);
+  try {
+    const db = await connectToDb();
+    const result = await db.collection("revenueReports").insertOne(req.body);
+    res.status(201).json({ insertedId: result.insertedId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-// Read (e.g. for oracle)
+// ✅ GET /reports/:vaultAddress/:period
 app.get("/reports/:vaultAddress/:period", async (req, res) => {
-  const { vaultAddress, period } = req.params;
-  const report = await RevenueReport.findOne({ vaultAddress, period });
-  res.json(report);
+  try {
+    const db = await connectToDb();
+    const report = await db.collection("revenueReports").findOne({
+      vaultAddress: req.params.vaultAddress,
+      period: req.params.period
+    });
+
+    if (!report) return res.status(404).json({ error: "Not found" });
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-// Mark as claimed
-app.put("/reports/:id/claim", async (req, res) => {
-  const report = await RevenueReport.findByIdAndUpdate(
-    req.params.id,
-    { claimed: true },
-    { new: true }
-  );
-  res.json(report);
+// ✅ DELETE /reports/:vaultAddress/:period
+app.delete("/reports/:vaultAddress/:period", async (req, res) => {
+  try {
+    const db = await connectToDb();
+    const result = await db.collection("revenueReports").deleteOne({
+      vaultAddress: req.params.vaultAddress,
+      period: req.params.period
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ deleted: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.listen(3000, () => console.log("Server running on port 3000"));
+// Export the wrapped handler
+module.exports = serverless(app);
